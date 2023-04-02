@@ -2,6 +2,7 @@ import pathspec
 from pathlib import Path
 import time
 import hashlib
+import os
 
 class HashBlock:
     hash_method = None
@@ -11,6 +12,7 @@ class HashBlock:
     old_hash = None
     old_lines = None #dict with key=path, value=(file_hash, timestamp)
     blocksize = 65536
+    hashfile = None
 
     def __init__(self, hash_method):
         self.hash_method = hash_method
@@ -18,6 +20,7 @@ class HashBlock:
         self.old_lines = {}
 
     def scan(self, ignorefile, hashfile):
+        self.hashfile = hashfile
         new_timestamp = str(int(time.time()))
         files = Path().glob('**/*')
         if Path(ignorefile).exists():
@@ -26,17 +29,19 @@ class HashBlock:
             files = [
                 file for file in files if not spec.match_file(str(file))
             ]
+        file_names = {str(f) for f in files}
         if Path(hashfile).exists():
             # hashfile format:
             # | hash_method
-            # | root_hash = hash(new_hash, old_hash)
-            # | new_hash = hash(nfilehash1, nfilehash2, ...)
+            # | root: `root_hash = hash(new_hash, old_hash)`
+            # | new: `new_hash = hash(nfilehash1, nfilehash2, ...)`
+            # | old: `old_hash = hash(ofilehash1, ofilehash2, ...)`
+            # | - + - newlines - + -
             # | nfilepath1 nfilehash1 nfiletimestamp1
             # | nfilepath2 nfilehash2 nfiletimestamp2
             # | nfilepath3 nfilehash3 nfiletimestamp3
             # more lines
-            # | ---
-            # | old_hash = hash(ofilehash1, ofilehash2, ...)
+            # | - + - oldlines - + -
             # | ofilepath1 ofilehash1 ofiletimestamp1
             # | ofilepath2 ofilehash2 ofiletimestamp2
             # | ofilepath3 ofilehash3 ofiletimestamp3
@@ -49,7 +54,8 @@ class HashBlock:
                         (key, value, timestamp) = line.split()
                         if key in self.old_lines:
                             raise Exception("duplicate entry: "+key)
-                        self.old_lines[key] = (value, timestamp)
+                        if key in file_names:
+                            self.old_lines[key] = (value, timestamp)
                     except:
                         #not a hashline
                         pass
@@ -57,6 +63,8 @@ class HashBlock:
             if file.is_dir():
                 continue
             file = str(file)
+            if file == hashfile:
+                continue
             file_hash = hashlib.new(self.hash_method)
             try:
                 with open(file, 'rb') as f:
@@ -95,24 +103,32 @@ class HashBlock:
         self.total_hash = total_hasher.hexdigest()
         new_output_lines = [' '.join([vkey, self.new_lines[vkey][0], self.new_lines[vkey][1]]) for vkey in self.new_lines]
         old_output_lines = [' '.join([vkey, self.old_lines[vkey][0], self.old_lines[vkey][1]]) for vkey in self.old_lines]
-        with open(hashfile, 'w') as file:
-            file.write(self.hash_method+'\n')
-            file.write('total: '+self.total_hash+'\n')
-            file.write('new: '+self.new_hash+'\n')
-            file.write('old: '+self.old_hash+'\n')
-            file.write('- + - newlines - + -'+'\n')
-            file.write('\n'.join(new_output_lines)+'\n')
-            file.write('- + - oldlines - + -'+'\n')
-            file.write('\n'.join(old_output_lines)+'\n')
+        if len(self.new_lines) > 0:
+            with open(hashfile, 'w') as file:
+                file.write(self.hash_method+'\n')
+                file.write('total: '+self.total_hash+'\n')
+                file.write('new: '+self.new_hash+'\n')
+                file.write('old: '+self.old_hash+'\n')
+                file.write('- + - newlines - + -'+'\n')
+                file.write('\n'.join(new_output_lines)+'\n')
+                file.write('- + - oldlines - + -'+'\n')
+                file.write('\n'.join(old_output_lines)+'\n')
 
 
     def apply(self, publishing_method):
         if publishing_method == 'shell':
-            print('root:', self.total_hash)
-            print('new:', self.new_hash)
-            print('old:', self.old_hash)
-            print('changes:')
-            print(" *", "\n * ".join(self.new_lines.keys()))
+            if len(self.new_lines) == 0:
+                print('no updates')
+            else:
+                print('root:', self.total_hash)
+                print('new:', self.new_hash)
+                print('old:', self.old_hash)
+                print('changes:')
+                print(" *", "\n * ".join(self.new_lines.keys()))
         elif publishing_method == 'git':
-            pass
+            files = ' '.join(list(self.new_lines.keys()) + list(self.old_lines.keys()))
+            os.system("git add " + self.hashfile + " " + files)
+            os.system("git commit -m 'timestampblocks update for root " + self.total_hash + "' -- " + 
+                      self.hashfile + " " + files)
+            os.system("git push")
 
