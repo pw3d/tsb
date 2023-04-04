@@ -14,6 +14,8 @@
 import configparser
 import argparse
 import hashblock
+import os
+import iota_client
 
 _possible_methods = ("git", "iota", "polygon", "shell")
 _configfile_name = ".timestampblocks"
@@ -69,7 +71,7 @@ def main():
     block = hashblock.HashBlock(settings["SETTINGS"]["hashmethod"])
     block.scan(settings["SETTINGS"]["ignorefile"], settings["SETTINGS"]["hashfile"])
     for method in methods:
-        block.apply(method)
+        apply(block, method)
 
 def query_configuration():
     config = current_settings();
@@ -95,6 +97,33 @@ def query_configuration():
     if len(inp) == 0 or inp not in "nN":
         with open(_configfile_name, "w") as configfile:
             config.write(configfile)
+
+def apply(block, publishing_method):
+    if publishing_method == 'shell':
+        if len(block.new_lines) == 0:
+            print('no updates')
+        else:
+            print('root:', block.total_hash)
+            print('new:', block.new_hash)
+            print('old:', block.old_hash)
+            print('changes:')
+            print(" *", "\n * ".join(block.new_lines.keys()))
+    elif publishing_method == 'git':
+        files = ' '.join(list(block.new_lines.keys()) + list(block.old_lines.keys()))
+        os.system("git add " + block.hashfile + " " + files)
+        os.system("git commit -m 'timestampblocks update for root " + block.total_hash + "' -- " + 
+                  block.hashfile + " " + files)
+        os.system("git push")
+    elif publishing_method == 'iota':
+        pass
+    elif publishing_method == 'polygon':
+        pass
+    elif publishing_method == 'arbitrum':
+        pass
+    elif publishing_method == 'bitcoin':
+        pass
+    elif publishing_method == 'ethereum':
+        pass
 
 if __name__ == "__main__":
     main()

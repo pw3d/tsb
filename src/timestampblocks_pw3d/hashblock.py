@@ -2,7 +2,6 @@ import pathspec
 from pathlib import Path
 import time
 import hashlib
-import os
 
 class HashBlock:
     hash_method = None
@@ -114,21 +113,4 @@ class HashBlock:
                 file.write('- + - oldlines - + -'+'\n')
                 file.write('\n'.join(old_output_lines)+'\n')
 
-
-    def apply(self, publishing_method):
-        if publishing_method == 'shell':
-            if len(self.new_lines) == 0:
-                print('no updates')
-            else:
-                print('root:', self.total_hash)
-                print('new:', self.new_hash)
-                print('old:', self.old_hash)
-                print('changes:')
-                print(" *", "\n * ".join(self.new_lines.keys()))
-        elif publishing_method == 'git':
-            files = ' '.join(list(self.new_lines.keys()) + list(self.old_lines.keys()))
-            os.system("git add " + self.hashfile + " " + files)
-            os.system("git commit -m 'timestampblocks update for root " + self.total_hash + "' -- " + 
-                      self.hashfile + " " + files)
-            os.system("git push")
 
