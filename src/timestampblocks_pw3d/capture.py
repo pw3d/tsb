@@ -8,112 +8,132 @@
 #.timestampblocks.ignore
 # - .timestampblocks.*
 
-#only include files/folders with new hashes? this as an option?
-#or have block sections old and new
-
 import configparser
 import argparse
 import hashblock
 import os
 import iota_client
+import hashlib
+import pathspec
+from pathlib import Path
+import time
+from datetime import datetime
 
-_possible_methods = ("git", "iota", "polygon", "shell")
-_configfile_name = ".timestampblocks"
-_config_default = {
-    "SETTINGS": {
-        "ignorefile": ".gitignore",
-        "methods": "git shell",
-        "hashmethod": "sha384",
-        "hashfile": "timestampblock.txt",
+_possible_publish = ("git", "iota", "polygon", "shell")
+_available_commands = ("update", "query-settings")
+_tsb_dir = ".timestampblocks/"
+if not os.path.exists(_tsb_dir):
+    os.makedirs(_tsb_dir)
+_config_file = _tsb_dir + "config"
+#_tree_file = _tsb_dir + "tree"
+#_last_hash_set = _tsb_dir + "hash_set"
+_log_file = "timestampblocks.log"
+_log_version=1
+_blocksize = 65536
+_publish_even_if_no_changes = False
+
+_config = {
+    "default": {
+        "publish": "git shell",
+        "hashing": "sha384",
     },
 }
-_settings = None
-
-def current_settings():
-    global _settings
-    if _settings == None:
-        _settings = configparser.ConfigParser()
-        _settings.read(_configfile_name)
-    return _settings
 
 def main():
-    parser = argparse.ArgumentParser(
-        "Timestamp Blocks",
-        "Timestamping Organization Utility",
-        "Be sure to stamp that into a block!")
-    global _configfile_name
-    parser.add_argument('-c', '--config', nargs=1)
-    parser.add_argument('-i', '--ignorefile', nargs=1)
-    parser.add_argument('-s', '--save-settings', action="store_true")
-    parser.add_argument('-q', '--query-settings', action="store_true")
-    parser.add_argument('-m', '--hashmethod', nargs=1)
-    parser.add_argument('methods', nargs="*")
+    settings = configparser.ConfigParser()
+    settings.read(_config_file)
+    write_config = False
+    if not settings.has_section("default"):
+        settings["default"] = _config["default"]
+        write_config = True
+    parser = argparse.ArgumentParser()
+    parser.add_argument('command', nargs=1,
+                        help="options are "+str(_available_commands))
+    parser.add_argument('-y', '--assume-yes', action="store_true",
+                        help="the 'no input required' option")
+    parser.add_argument('-s', '--hashing', nargs=1, default=[settings["default"]["hashing"]],
+                        metavar="algorithm",
+                        help="options are "+str(hashlib.algorithms_available)+",\n"+
+                        "(setting is '" + settings["default"]["hashing"]+"')")
+    parser.add_argument('-p', '--publish', nargs="+", default=settings["default"]["publish"].split(),
+                        metavar="channel",
+                        help="options are "+str(_possible_publish)+",\n"+
+                        "(setting is " + str(settings["default"]["publish"].split())+")")
+#    parser.add_argument('-m', '--message', nargs=1, metavar="text",
+#                        help="optional message where publishing channel allows a message")
+#    parser.add_argument('-', '--parameters', nargs="+",
+#                        metavar="path",
+#                        help="files to be selected")
+#    parser.add_argument('params', nargs="*",
+#                        metavar="path [path ...]",
+#                        help="files to be selected")
     args = parser.parse_args()
-    if args.config != None:
-        _configfile_name = args.config
-    settings = current_settings()
-    if args.hashmethod != None:
-        settings["SETTINGS"]["hashmethod"] = args.hashmethod
-    if not settings.has_section("SETTINGS"):
-        settings["SETTINGS"] = {}
-    if args.ignorefile != None:
-        settings["SETTINGS"]["ignorefile"] = args.ignorefile
-    if settings["SETTINGS"].get("ignorefile", None) == None:
-        settings["SETTINGS"]["ignorefile"] = ".gitignore"
-    if len(args.methods) > 0:
-        settings["SETTINGS"]["methods"] = ' '.join(args.methods)
-    if args.save_settings:
-        with open(_configfile_name, "w") as configfile:
-            settings.write(configfile)
-    if args.query_settings:
-        query_configuration()
-    methods = settings["SETTINGS"].get("methods", "").split()
-    block = hashblock.HashBlock(settings["SETTINGS"]["hashmethod"])
-    block.scan(settings["SETTINGS"]["ignorefile"], settings["SETTINGS"]["hashfile"])
-    for method in methods:
-        apply(block, method)
 
-def query_configuration():
-    config = current_settings();
-    print("Adjusting Configuration")
-    for (section, dic) in _config_default.items():
-        for (vkey, vvalue) in dic.items():
-            if config.has_section(section):
-                vvalue = config[section].get(vkey, vvalue);
-            else:
-                config[section] = {}
-            print(" -", vkey, "*(" + vvalue + ")")
-            inp = input()
-            if len(inp) > 0:
-                vvalue = inp
-            config[section][vkey] = vvalue
-    print("We have the following configuration")
-    for section in config.sections():
-        print(" ", section)
-        for (vkey, vvalue) in config[section].items():
-            print(" - ", vkey + ": ", vvalue)
-    print("Save? (any key other than n or N will save to storage)");
-    inp = input()
-    if len(inp) == 0 or inp not in "nN":
-        with open(_configfile_name, "w") as configfile:
-            config.write(configfile)
+    if args.hashing != None:
+        settings["default"]["hashing"] = args.hashing[0]
+    if len(args.publish) > 0:
+        settings["default"]["publish"] = ' '.join(args.publish)
+
+#    params = args.params
+#    if args.parameters != None:
+#        assert len(args.params)==0, "either use parameters or params, it's confusing if you use both"
+#        params = args.parameters
+
+    command = args.command[0]
+    if command == "query-settings":
+#        assert len(params) == 0, "no parameters allowed for this command!"
+        write_config = True
+        settings = query_configuration(settings)
+    elif command == "update":
+        hash_set, last_root, last_proper_root = evaluate_previous_logs(settings)
+        new_hashes = get_new_hashes(hash_set, settings["default"]["hashing"])
+        if len(new_hashes) > 0 or _publish_even_if_no_changes:
+            new_block = build_block(new_hashes, last_root, last_proper_root, settings["default"]["hashing"])
+            with open(_log_file, "a") as f:
+                if (last_root != last_proper_root):
+                    f.write("#hashing "+settings["default"]["hashing"]+"\n")
+                f.write(new_block["data"]+"\n")
+                f.write("#root " + new_block["root"]+"\n")
+            publishers = settings["default"]["publish"].split()
+            for channel in publishers:
+                publish(channel, new_block, args.assume_yes)
+        else:
+            print("no updates detected")
+
+    if write_config:
+        with open(_config_file, "w") as configfile:
+            settings.write(configfile)
+
+def publish(channel, block, assume_yes):
+    if channel == "shell":
+        print("New block with root '"+ block["root"]+"', and data:")
+        print(block["data"])
+        print("Used hashing algorithm:", block["hashing"])
+        print("Timestamp:", block["timestamp"], "--", datetime.fromtimestamp(block["timestamp"]))
+    elif channel == "git":
+        print("Git submission:")
+        os.system("git add -n .")
+        if not assume_yes:
+            print("Proceed? (Yn)")
+            if input() == "n":
+                print("Aborting...")
+                return
+        os.system("git add .")
+        os.system("git status")
+        if not assume_yes:
+            print("Proceed? (Yn)")
+            if input() == "n":
+                print("Aborting...")
+                return
+        os.system("git commit -a -m 'timestampblocks update for root " + block["root"] + "'")
+        os.system("git push")
+    else:
+        print(channel, block, assume_yes)
 
 def apply(block, publishing_method):
-    if publishing_method == 'shell':
-        if len(block.new_lines) == 0:
-            print('no updates')
-        else:
-            print('root:', block.total_hash)
-            print('new:', block.new_hash)
-            print('old:', block.old_hash)
-            print('changes:')
-            print(" *", "\n * ".join(block.new_lines.keys()))
-    elif publishing_method == 'git':
+    if publishing_method == 'git':
         files = ' '.join(list(block.new_lines.keys()) + list(block.old_lines.keys()))
         os.system("git add " + block.hashfile + " " + files)
-        os.system("git commit -m 'timestampblocks update for root " + block.total_hash + "' -- " + 
-                  block.hashfile + " " + files)
-        os.system("git push")
     elif publishing_method == 'iota':
         pass
     elif publishing_method == 'polygon':
@@ -124,6 +144,105 @@ def apply(block, publishing_method):
         pass
     elif publishing_method == 'ethereum':
         pass
+
+def build_block(new_hashes, last_root, last_proper_root, hashing):
+    timestamp = int(time.time())
+    line_builder = [str(timestamp)]
+    if len(last_proper_root) > 0 and last_root != last_proper_root:
+        line_builder.append(last_proper_root)
+    if len(last_root) > 0:
+        line_builder.append(last_root)
+    line_builder.extend(new_hashes)
+    line = " ".join(line_builder)
+    algo = hashlib.new(hashing)
+    algo.update(line.encode("utf-8"))
+    block = {
+        "root": algo.hexdigest(),
+        "data": line,
+        "timestamp": timestamp,
+        "hashed_files": new_hashes,
+        "hashing": hashing
+    }
+    return block
+
+def get_new_hashes(hash_set, hashing):
+    files = Path().glob("**/*")
+    lines = []
+    if Path(".gitignore").exists():
+        lines = Path(".gitignore").read_text().splitlines()
+    lines = lines + [_log_file]
+    spec = pathspec.PathSpec.from_lines("gitwildmatch", lines)
+    files = [
+        file for file in files if not spec.match_file(str(file))
+    ]
+    new_hashes = set()
+    for file in files:
+        if file.is_dir():
+            continue
+        filename = str(file)
+        algo = hashlib.new(hashing)
+        try:
+            with open(file, 'rb') as f:
+                fb = f.read(_blocksize)
+                while len(fb) > 0:
+                    algo.update(fb)
+                    fb = f.read(_blocksize)
+        except:
+            pass
+        hash_value = algo.hexdigest()
+        if hash_value not in hash_set:
+            new_hashes.add(hash_value)
+    return list(new_hashes)
+
+def evaluate_previous_logs(settings):
+    log_version=0
+    hash_set = set()
+    hashing = ""
+    last_root = ""
+    last_hashing_root = ""
+    previous_line = ""
+    if Path(_log_file).exists():
+        lines = Path(_log_file).read_text().splitlines()
+        for line in lines:
+            if line[0] == "#":
+                if line.startswith("#timehashblock v"):
+                    log_version=int(line[16:])
+                elif line.startswith("#hashing "):
+                    hashing = line[9:]
+                elif line.startswith("#root "):
+                    last_root = line[6:]
+                    if hashing == settings["default"]["hashing"]:
+                        last_hashing_root = last_root
+                    algo = hashlib.new(hashing)
+                    algo.update(previous_line.encode("utf-8"))
+                    assert last_root == algo.hexdigest()
+            else:
+                previous_line = line
+                if hashing == settings["default"]["hashing"]:
+                    hash_set.update(line.split())
+    if log_version != _log_version:
+        assert log_version < _log_version, "existing log is more advanced than this program"
+        with open(_log_file, 'a') as file:
+            file.write("#timehashblock v"+str(_log_version)+"\n")
+    return hash_set, last_root, last_hashing_root
+
+def query_configuration(settings):
+    print("Adjusting Configuration")
+    print("-----------------------")
+    print("Default publish channels:")
+    print(" - available: " + str(_possible_publish))
+    print(" - currently: '" + settings["default"]["publish"]+"'")
+    inp = input()
+    if len(inp) > 0:
+        settings["default"]["publish"] = inp
+    print("-----------------------")
+    print("Default hash algorithm:")
+    print(" - available: " + str(hashlib.algorithms_available))
+    print(" - currently: '" + settings["default"]["hasing"]+"'")
+    inp = input()
+    if len(inp) > 0:
+        settings["default"]["hashing"] = inp
+    return settings
 
 if __name__ == "__main__":
     main()

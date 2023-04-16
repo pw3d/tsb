@@ -19,6 +19,26 @@ class HashBlock:
         self.old_lines = {}
 
     def scan(self, ignorefile, hashfile):
+        # currently:
+        # id via path, sorting as old or new
+        # merkle tree
+        # root
+        #   new
+        #     ... files
+        #   old
+        #     ... files
+        #
+        # might be better:
+        # sorting via last change date
+        # id via hash
+        # root
+        #   entry with time
+        #     timestamp
+        #     ... filehashes
+        #   ... other entries
+        #
+        # could mean timestampblock file structure:
+        # roothash timestamp lastroothash hash1 hash2 hash3 ...
         self.hashfile = hashfile
         new_timestamp = str(int(time.time()))
         files = Path().glob('**/*')

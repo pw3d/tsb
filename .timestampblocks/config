@@ -1,0 +1,4 @@
+[default]
+publish = git shell
+hashing = sha384
+

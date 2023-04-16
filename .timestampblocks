@@ -1,6 +1,0 @@
-[SETTINGS]
-ignorefile = .gitignore
-methods = git shell
-hashmethod = sha384
-hashfile = timestampblock.txt
-
