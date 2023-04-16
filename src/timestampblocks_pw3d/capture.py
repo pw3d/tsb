@@ -112,15 +112,15 @@ def publish(channel, block, assume_yes):
         print("Timestamp:", block["timestamp"], "--", datetime.fromtimestamp(block["timestamp"]))
     elif channel == "git":
         print("Git submission:")
-        os.system("git add -n .")
         if not assume_yes:
+            os.system("git add -n .")
             print("Proceed? (Yn)")
             if input() == "n":
                 print("Aborting...")
                 return
         os.system("git add .")
-        os.system("git status")
         if not assume_yes:
+            os.system("git status")
             print("Proceed? (Yn)")
             if input() == "n":
                 print("Aborting...")
@@ -128,7 +128,7 @@ def publish(channel, block, assume_yes):
         os.system("git commit -a -m 'timestampblocks update for root " + block["root"] + "'")
         os.system("git push")
     else:
-        print(channel, block, assume_yes)
+        print("Not implemented yet!", channel, block, assume_yes)
 
 def apply(block, publishing_method):
     if publishing_method == 'git':
