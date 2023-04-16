@@ -123,6 +123,9 @@ def publish(channel, block, assume_yes):
 #    elif publishing_method == 'ethereum':
 #        pass
 
+def publish_iota(block, assume_yes):
+    pass
+
 def publish_git(block, assume_yes):
     if len(str(os.popen("git check-ignore .env").read())) == 0:
         print(".env file is not excluded from git!")
