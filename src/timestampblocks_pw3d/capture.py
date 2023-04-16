@@ -106,44 +106,67 @@ def main():
 
 def publish(channel, block, assume_yes):
     if channel == "shell":
-        print("New block with root '"+ block["root"]+"', and data:")
-        print(block["data"])
-        print("Used hashing algorithm:", block["hashing"])
-        print("Timestamp:", block["timestamp"], "--", datetime.fromtimestamp(block["timestamp"]))
+        publish_shell(block, assume_yes)
     elif channel == "git":
-        print("Git submission:")
-        if not assume_yes:
-            os.system("git add -n .")
-            print("Proceed? (Yn)")
-            if input() == "n":
-                print("Aborting...")
-                return
-        os.system("git add .")
-        if not assume_yes:
-            os.system("git status")
-            print("Proceed? (Yn)")
-            if input() == "n":
-                print("Aborting...")
-                return
-        os.system("git commit -a -m 'timestampblocks update for root " + block["root"] + "'")
-        os.system("git push")
+        publish_git(block, assume_yes)
     else:
         print("Not implemented yet!", channel, block, assume_yes)
 
-def apply(block, publishing_method):
-    if publishing_method == 'git':
-        files = ' '.join(list(block.new_lines.keys()) + list(block.old_lines.keys()))
-        os.system("git add " + block.hashfile + " " + files)
-    elif publishing_method == 'iota':
-        pass
-    elif publishing_method == 'polygon':
-        pass
-    elif publishing_method == 'arbitrum':
-        pass
-    elif publishing_method == 'bitcoin':
-        pass
-    elif publishing_method == 'ethereum':
-        pass
+#    elif publishing_method == 'iota':
+#        pass
+#    elif publishing_method == 'polygon':
+#        pass
+#    elif publishing_method == 'arbitrum':
+#        pass
+#    elif publishing_method == 'bitcoin':
+#        pass
+#    elif publishing_method == 'ethereum':
+#        pass
+
+def publish_git(block, assume_yes):
+    if len(str(os.popen("git check-ignore .env").read())) == 0:
+        print(".env file is not excluded from git!")
+        print("Add .env to .gitignore? (Yn)")
+        inp = "Y"
+        if assume_yes:
+            print(inp)
+        else:
+            inp = input()
+        if inp != "n":
+            with open(".gitignore", "a") as file:
+                file.write(".env")
+    if len(str(os.popen("git ls-files ./" + _log_file).read())) == 0:
+        print(_log_file, "is ignored by git")
+        print("Run 'git add --force", _log_file+"'? (Yn)")
+        inp = "Y"
+        if assume_yes:
+            print(inp)
+        else:
+            inp = input()
+        if inp != "n":
+            os.system("git add --force " + _log_file)
+    print("Git submission:")
+    if not assume_yes:
+        os.system("git add -n .")
+        print("Proceed? (Yn)")
+        if input() == "n":
+            print("Aborting...")
+            return
+    os.system("git add .")
+    if not assume_yes:
+        os.system("git status")
+        print("Proceed? (Yn)")
+        if input() == "n":
+            print("Aborting...")
+            return
+    os.system("git commit -a -m 'timestampblocks update for root " + block["root"] + "'")
+    os.system("git push")
+
+def publish_shell(block, assume_yes):
+    print("New block with root '"+ block["root"]+"', and data:")
+    print(block["data"])
+    print("Used hashing algorithm:", block["hashing"])
+    print("Timestamp:", block["timestamp"], "--", datetime.fromtimestamp(block["timestamp"]))
 
 def build_block(new_hashes, last_root, last_proper_root, hashing):
     timestamp = int(time.time())
