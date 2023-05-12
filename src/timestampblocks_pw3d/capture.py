@@ -12,14 +12,16 @@ import configparser
 import argparse
 import hashblock
 import os
-import iota_client
 import hashlib
 import pathspec
 from pathlib import Path
 import time
 from datetime import datetime
+from dotenv import load_dotenv
 
-_possible_publish = ("git", "iota", "polygon", "shell")
+from iota_client import IotaClient
+
+_possible_publish = ("git", "iota", "polygon", "shell", "ethereum")
 _available_commands = ("update", "query-settings")
 _tsb_dir = ".timestampblocks/"
 if not os.path.exists(_tsb_dir):
@@ -32,20 +34,25 @@ _log_version=1
 _blocksize = 65536
 _publish_even_if_no_changes = False
 
+load_dotenv()
+
 _config = {
     "default": {
         "publish": "git shell",
         "hashing": "sha384",
+    },
+    "iota": {
+        "node": "https://iota-node.tanglebay.com",
     },
 }
 
 def main():
     settings = configparser.ConfigParser()
     settings.read(_config_file)
-    write_config = False
     if not settings.has_section("default"):
         settings["default"] = _config["default"]
-        write_config = True
+        with open(_config_file, "w") as configfile:
+            settings.write(configfile)
     parser = argparse.ArgumentParser()
     parser.add_argument('command', nargs=1,
                         help="options are "+str(_available_commands))
@@ -82,8 +89,9 @@ def main():
     command = args.command[0]
     if command == "query-settings":
 #        assert len(params) == 0, "no parameters allowed for this command!"
-        write_config = True
         settings = query_configuration(settings)
+        with open(_config_file, "w") as configfile:
+            settings.write(configfile)
     elif command == "update":
         hash_set, last_root, last_proper_root = evaluate_previous_logs(settings)
         new_hashes = get_new_hashes(hash_set, settings["default"]["hashing"])
@@ -100,17 +108,17 @@ def main():
         else:
             print("no updates detected")
 
-    if write_config:
-        with open(_config_file, "w") as configfile:
-            settings.write(configfile)
-
 def publish(channel, block, assume_yes):
+    response = None
     if channel == "shell":
-        publish_shell(block, assume_yes)
+        response = publish_shell(block, assume_yes)
     elif channel == "git":
-        publish_git(block, assume_yes)
+        response = publish_git(block, assume_yes)
     else:
         print("Not implemented yet!", channel, block, assume_yes)
+    if response != None:
+        # TODO log the response (likely a transaction id)
+        pass
 
 #    elif publishing_method == 'iota':
 #        pass
@@ -124,7 +132,18 @@ def publish(channel, block, assume_yes):
 #        pass
 
 def publish_iota(block, assume_yes):
-    pass
+    settings = configparser.ConfigParser()
+    settings.read(_config_file)
+    node_uri = _config["iota"]["node"]
+    if settings.has_section("iota"):
+        node_uri = settings["iota"]["node"]
+    client = IotaClient({'nodes': [node_uri]})
+    options = {
+        "tag": "0x" + "timehashblock".encode("utf-8").hex(),
+        "data": block["root"],
+    }
+    response = client.build_and_post_block(None, options)
+    return response[0]
 
 def publish_git(block, assume_yes):
     if len(str(os.popen("git check-ignore .env").read())) == 0:
@@ -261,6 +280,15 @@ def query_configuration(settings):
     inp = input()
     if len(inp) > 0:
         settings["default"]["publish"] = inp
+    channels = set(settings["default"]["publish"].split())
+    if "iota" in channels:
+        if not settings.has_section("iota"):
+            settings["iota"] = _config["iota"]
+        print("-------")
+        print("IOTA node (" + settings["iota"]["node"] + ")")
+        inp = input()
+        if len(inp) > 0:
+            settings["iota"]["node"] = inp
     print("-----------------------")
     print("Default hash algorithm:")
     print(" - available: " + str(hashlib.algorithms_available))
