@@ -1,4 +1,14 @@
 [default]
-publish = git shell
+publish = iota sepolia git shell
 hashing = sha384
+
+[sepolia]
+protocol = evm
+node = https://sepolia.infura.io/v3/
+api-key = INFURA_SECRET
+private-key = EVM_SECRET
+
+[iota]
+protocol = iota
+node = https://iota-node.tanglebay.com
 
