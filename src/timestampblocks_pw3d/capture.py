@@ -194,7 +194,7 @@ def publish_iota(block, assume_yes, dummy=False):
     client = IotaClient({'nodes': [node_uri]})
     options = {
         "tag": "0x" + "timehashblock".encode("utf-8").hex(),
-        "data": block["root"],
+        "data": "0x" + block["root"],
     }
     if dummy:
         print("-dummy-", "not publishing on iota", options)
